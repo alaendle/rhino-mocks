@@ -18,7 +18,7 @@ namespace Rhino.Mocks.Impl.Invocation.Specifications
         ///</summary>
         public bool IsSatisfiedBy(IInvocation item)
         {
-            return Array.IndexOf(objectMethods, item.Method) != -1;
+            return false; // Array.IndexOf(objectMethods, item.Method) != -1;
         }
     }
 }

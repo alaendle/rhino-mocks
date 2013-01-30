@@ -179,6 +179,127 @@ namespace Rhino.Mocks
         /// </summary>
         private readonly ProxyMethodExpectationsDictionary repeatableMethods;
 
+        [Serializable]
+        private class ReallyAllMethodsHook : AllMethodsHook
+        {
+            public override bool ShouldInterceptMethod(Type type, MethodInfo methodInfo)
+            {
+                //return base.ShouldInterceptMethod(type, methodInfo);
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Base class to allow mocking proxies to intercept virtual methods of object.
+        /// </summary>
+        [Serializable]
+        public class ProxyBase
+        {
+            /// <summary>
+            /// Determines whether the specified <see cref="System.Object" /> is equal to this instance.
+            /// </summary>
+            /// <param name="obj">The <see cref="System.Object" /> to compare with this instance.</param>
+            /// <returns>
+            ///   <c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.
+            /// </returns>
+            public override bool Equals(object obj)
+            {
+                var proxy = this as IProxyTargetAccessor;
+                if (proxy != null)
+                {
+                    foreach (var interceptor in proxy.GetInterceptors())
+                    {
+                        var invocation = new Invocation(this, new IInterceptor[] { }, typeof(object).GetMethod("Equals", new[] { typeof(object) }), new object[] { });
+                        interceptor.Intercept(invocation);
+                        return (bool)invocation.ReturnValue;
+                    }
+                }
+
+                return base.Equals(obj);
+            }
+
+            /// <summary>
+            /// Returns a hash code for this instance.
+            /// </summary>
+            /// <returns>
+            /// A hash code for this instance, suitable for use in hashing algorithms and data structures like a hash table. 
+            /// </returns>
+            public override int GetHashCode()
+            {
+                var proxy = this as IProxyTargetAccessor;
+                if (proxy != null)
+                {
+                    foreach (var interceptor in proxy.GetInterceptors())
+                    {
+                        var invocation = new Invocation(this, new IInterceptor[] { }, typeof(object).GetMethod("GetHashCode"), new object[] { });
+                        interceptor.Intercept(invocation);
+                        return (int)invocation.ReturnValue;
+                    }
+                }
+
+                return base.GetHashCode();
+            }
+
+            /// <summary>
+            /// Returns a <see cref="System.String" /> that represents this instance.
+            /// </summary>
+            /// <returns>
+            /// A <see cref="System.String" /> that represents this instance.
+            /// </returns>
+            public override string ToString()
+            {
+                var proxy = this as IProxyTargetAccessor;
+                if (proxy != null)
+                {
+                    foreach (var interceptor in proxy.GetInterceptors())
+                    {
+                        var invocation = new Invocation(this, new IInterceptor[] { }, typeof(object).GetMethod("ToString"), new object[] { });
+                        interceptor.Intercept(invocation);
+                        return (string)invocation.ReturnValue;
+                    }
+                }
+
+                return base.ToString();
+            }
+
+            private class Invocation : AbstractInvocation
+            {
+                public Invocation(object proxy, IInterceptor[] interceptors, MethodInfo proxiedMethod, object[] arguments)
+                    : base(proxy, interceptors, proxiedMethod, arguments)
+                {
+                }
+
+                protected override void InvokeMethodOnTarget()
+                {
+                    this.Method.Invoke(this.Proxy, this.Arguments);
+                }
+
+                public override object InvocationTarget
+                {
+                    get
+                    {
+                        return this.Proxy;
+                    }
+                }
+
+                public override Type TargetType
+                {
+                    get
+                    {
+                        return typeof(object);
+                    }
+                }
+
+                public override MethodInfo MethodInvocationTarget
+                {
+                    get
+                    {
+                        return this.Method;
+                    }
+                }
+            }
+        }
+
         private ProxyGenerationOptions proxyGenerationOptions;
         private InvocationVisitorsFactory invocationVisitorsFactory;
 
@@ -213,18 +334,18 @@ namespace Rhino.Mocks
         /// </summary>
         static MockRepository()
         {
-          if (generatorMap == null)
-          {
-            generatorMap = new Dictionary<Type, ProxyGenerator>();
-          }
+            if (generatorMap == null)
+            {
+                generatorMap = new Dictionary<Type, ProxyGenerator>();
+            }
 
-          if (lastRepository == null)
-          {
-            lastRepository = new MockRepository();
-          }
+            if (lastRepository == null)
+            {
+                lastRepository = new MockRepository();
+            }
 
-          AttributesToAvoidReplicating.Add<UIPermissionAttribute>();
-          AttributesToAvoidReplicating.Add<EnvironmentPermissionAttribute>();
+            AttributesToAvoidReplicating.Add<UIPermissionAttribute>();
+            AttributesToAvoidReplicating.Add<EnvironmentPermissionAttribute>();
         }
 
         /// <summary>
@@ -232,12 +353,14 @@ namespace Rhino.Mocks
         /// </summary>
         public MockRepository()
         {
-            proxyGenerationOptions = new ProxyGenerationOptions
+            proxyGenerationOptions = new ProxyGenerationOptions(new ReallyAllMethodsHook())
             {
                 AdditionalAttributes = 
                     {
                         CreateProtectAttributeBuilder()
                     }
+                          ,
+                BaseTypeForInterfaceProxy = typeof(ProxyBase)
             };
             recorders = new Stack();
             repeatableMethods = new ProxyMethodExpectationsDictionary();
@@ -519,7 +642,7 @@ namespace Rhino.Mocks
         private object RemotingMock(Type type, CreateMockState factory)
         {
             ProxyInstance rhinoProxy = new ProxyInstance(this, type);
-            RhinoInterceptor interceptor = new RhinoInterceptor(this, rhinoProxy,invocationVisitorsFactory.CreateStandardInvocationVisitors(rhinoProxy, this));
+            RhinoInterceptor interceptor = new RhinoInterceptor(this, rhinoProxy, invocationVisitorsFactory.CreateStandardInvocationVisitors(rhinoProxy, this));
             object transparentProxy = new RemotingMockGenerator().CreateRemotingMock(type, interceptor, rhinoProxy);
             IMockState value = factory(rhinoProxy);
             proxies.Add(transparentProxy, value);
@@ -658,16 +781,16 @@ namespace Rhino.Mocks
             //proper state.
             if (proxies.ContainsKey(proxy) == false)
             {
-              if (!method.IsAbstract)
-              {
-                invocation.Proceed();
-                return invocation.ReturnValue;
-              }
+                if (!method.IsAbstract)
+                {
+                    invocation.Proceed();
+                    return invocation.ReturnValue;
+                }
 
-              return Utilities.ReturnValueUtil.DefaultValue(method.ReturnType, invocation);
+                return Utilities.ReturnValueUtil.DefaultValue(method.ReturnType, invocation);
             }
 
-          IMockState state = proxies[proxy];
+            IMockState state = proxies[proxy];
             GetMockedObject(proxy).MethodCall(method, args);
             return state.MethodCall(invocation, method, args);
         }
@@ -685,15 +808,15 @@ namespace Rhino.Mocks
             return invocationProxy;
         }
 
-		private CustomAttributeBuilder CreateProtectAttributeBuilder()
-		{
-			var ctorInfo = typeof (__ProtectAttribute).GetConstructor(Type.EmptyTypes);
-			if (ctorInfo == null)
-			{
-				throw new Exception("Unable to find a parameterless constructor for __ProtectAttribute");
-			}
-			return new CustomAttributeBuilder(ctorInfo, new object[0]);
-		}
+        private CustomAttributeBuilder CreateProtectAttributeBuilder()
+        {
+            var ctorInfo = typeof(__ProtectAttribute).GetConstructor(Type.EmptyTypes);
+            if (ctorInfo == null)
+            {
+                throw new Exception("Unable to find a parameterless constructor for __ProtectAttribute");
+            }
+            return new CustomAttributeBuilder(ctorInfo, new object[0]);
+        }
 
         private IMockState CreateRecordState(IMockedObject mockedObject)
         {
@@ -730,14 +853,14 @@ namespace Rhino.Mocks
             List<Type> implementedTypesForGenericInvocationDiscoverability = new List<Type>(extras);
             implementedTypesForGenericInvocationDiscoverability.Add(type);
             ProxyInstance proxyInstance = new ProxyInstance(this, implementedTypesForGenericInvocationDiscoverability.ToArray());
-            RhinoInterceptor interceptor = new RhinoInterceptor(this, proxyInstance,invocationVisitorsFactory.CreateStandardInvocationVisitors(proxyInstance, this));
+            RhinoInterceptor interceptor = new RhinoInterceptor(this, proxyInstance, invocationVisitorsFactory.CreateStandardInvocationVisitors(proxyInstance, this));
             ArrayList types = new ArrayList();
             types.AddRange(extras);
             types.Add(typeof(IMockedObject));
             object proxy;
             try
             {
-                proxyGenerationOptions = ProxyGenerationOptions.Default;
+                //proxyGenerationOptions = ProxyGenerationOptions.Default;
                 proxy = GetProxyGenerator(type).CreateClassProxy(type, (Type[])types.ToArray(typeof(Type)),
                                                    proxyGenerationOptions,
                                                    argumentsForConstructor, interceptor);
@@ -766,7 +889,7 @@ namespace Rhino.Mocks
             ProxyInstance proxyInstance = new ProxyInstance(this,
                                                              implementedTypesForGenericInvocationDiscoverability
                                                                  .ToArray());
-            RhinoInterceptor interceptor = new RhinoInterceptor(this, proxyInstance,invocationVisitorsFactory.CreateStandardInvocationVisitors(proxyInstance, this));
+            RhinoInterceptor interceptor = new RhinoInterceptor(this, proxyInstance, invocationVisitorsFactory.CreateStandardInvocationVisitors(proxyInstance, this));
 
             List<Type> types = new List<Type>();
             types.AddRange(extras);
@@ -786,7 +909,7 @@ namespace Rhino.Mocks
             object proxy;
 
             ProxyInstance proxyInstance = new ProxyInstance(this);
-            RhinoInterceptor interceptor = new RhinoInterceptor(this, proxyInstance,invocationVisitorsFactory.CreateStandardInvocationVisitors(proxyInstance, this));
+            RhinoInterceptor interceptor = new RhinoInterceptor(this, proxyInstance, invocationVisitorsFactory.CreateStandardInvocationVisitors(proxyInstance, this));
 
             Type[] types = new Type[] { typeof(IMockedObject) };
             var delegateTargetInterface = delegateTargetInterfaceCreator.GetDelegateTargetInterface(type);
@@ -1030,7 +1153,7 @@ namespace Rhino.Mocks
         {
             if (generatorMap == null)
             {
-                generatorMap = new Dictionary<Type, ProxyGenerator>(); 
+                generatorMap = new Dictionary<Type, ProxyGenerator>();
             }
 
             if (!generatorMap.ContainsKey(type))
@@ -1060,7 +1183,7 @@ namespace Rhino.Mocks
          */
 
         // Static methods for working with RhinoMocks using AAA syntax
-        
+
         /// <summary>Generates a stub without needing a <see cref="MockRepository"/></summary>
         /// <param name="argumentsForConstructor">Arguments for <typeparamref name="T"/>'s constructor</param>
         /// <typeparam name="T">The <see cref="Type"/> of stub to create.</typeparam>
@@ -1078,7 +1201,7 @@ namespace Rhino.Mocks
         /// <returns>the multi-stub object</returns>
         public static T GenerateStub<T, TMultiMockInterface1>(params object[] argumentsForConstructor)
         {
-          return (T)GenerateStub(typeof(T), new[] { typeof(TMultiMockInterface1) }, argumentsForConstructor);
+            return (T)GenerateStub(typeof(T), new[] { typeof(TMultiMockInterface1) }, argumentsForConstructor);
         }
 
         /// <summary>Generate a multi-stub object without without needing a <see cref="MockRepository"/></summary>
@@ -1089,7 +1212,7 @@ namespace Rhino.Mocks
         /// <returns>the multi-stub object</returns>
         public static T GenerateStub<T, TMultiMockInterface1, TMultiMockInterface2>(params object[] argumentsForConstructor)
         {
-          return (T)GenerateStub(typeof(T), new[] { typeof(TMultiMockInterface1), typeof(TMultiMockInterface2) }, argumentsForConstructor);
+            return (T)GenerateStub(typeof(T), new[] { typeof(TMultiMockInterface1), typeof(TMultiMockInterface2) }, argumentsForConstructor);
         }
 
         /// <summary>Generates a stub without needing a <see cref="MockRepository"/></summary>
@@ -1110,7 +1233,7 @@ namespace Rhino.Mocks
         /// <seealso cref="Stub(Type, Type[], object[])"/>
         public static object GenerateStub(Type type, Type[] extraTypes, params object[] argumentsForConstructor)
         {
-          return CreateMockInReplay(repo => repo.Stub(type, extraTypes, argumentsForConstructor));
+            return CreateMockInReplay(repo => repo.Stub(type, extraTypes, argumentsForConstructor));
         }
 
         /// <summary>Generate a mock object without needing a <see cref="MockRepository"/></summary>
@@ -1319,7 +1442,6 @@ namespace Rhino.Mocks
             repository.Replay(mockObject);
             return mockObject;
         }
-       
 
         #endregion
 
@@ -1339,7 +1461,7 @@ namespace Rhino.Mocks
         // N.B. mockRepository.ReplayAll() and mockRepository.VerifyAll()
         //      calls are taken care of by Record/Playback
         //</summary>
-        
+
         ///<summary>
         ///</summary>
         ///<returns></returns>
@@ -1520,9 +1642,9 @@ namespace Rhino.Mocks
             CreateMockState createStub = mockedObject => new StubRecordMockState(mockedObject, this, false);
             if (ShouldUseRemotingProxy(type, argumentsForConstructor))
                 return RemotingMock(type, createStub);
-            
-            if(types==null) types = new Type[0];
-            
+
+            if (types == null) types = new Type[0];
+
             return CreateMockObject(type, createStub, types, argumentsForConstructor);
         }
 
